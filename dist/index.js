@@ -1,5 +1,5 @@
 // src/index.ts
-import { randomUUID } from "node:crypto";
+import { createHash as createHash2, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { toolPolicyKind } from "@agnes/extension-api";
 import { defineAgnesPlugin, defineTool, toolError } from "@agnes/plugin-runtime";
@@ -20,6 +20,191 @@ function confirmationLabel(mode, principal, locale) {
     return zh ? `\u5B8C\u5168\u8BBF\u95EE\u4E0B\u81EA\u52A8\u786E\u8BA4\uFF08\u4E3B\u4F53 ${principal}\uFF09` : `Auto-confirmed under full access (principal ${principal})`;
   if (mode === "manual") return zh ? `\u5DF2\u7531\u771F\u4EBA\u7B7E\u7F72: ${principal}` : `Signed by ${principal}`;
   return zh ? `\u786E\u8BA4\u65B9\u5F0F\u672A\u8BB0\u5F55\uFF08\u4E3B\u4F53 ${principal}\uFF09` : `Confirmation mode not recorded (principal ${principal})`;
+}
+
+// src/evidence-cards.ts
+var hostDetails = "Open the Host tool details for the original evidence record. \u8BF7\u6253\u5F00\u5BBF\u4E3B\u5DE5\u5177\u8BE6\u60C5\u67E5\u770B\u539F\u59CB\u8BC1\u636E\u8BB0\u5F55\u3002";
+var bilingual = (text2) => `${text2.en} / ${text2["zh-CN"]}`;
+var revision = (value) => `r${value}`;
+var noEvidence = "No evidence reference recorded / \u672A\u8BB0\u5F55\u8BC1\u636E\u5F15\u7528";
+var limitRows = 16;
+var tableBudget = 5500;
+function clip(value) {
+  return value.length <= 420 ? value : `${value.slice(0, 419)}\u2026`;
+}
+function card(id2, title, summary) {
+  const surface = {
+    id: id2,
+    revision: 1,
+    title,
+    summary,
+    placement: { inline: true, workbench: true, preferred: "inline" },
+    components: [],
+    data: {},
+    actions: []
+  };
+  function text2(id3, title2, value) {
+    surface.components.push({ id: id3, title: title2, kind: "text", dataKey: id3 });
+    surface.data[id3] = value;
+  }
+  function detail(id3, title2, entries) {
+    const fields = entries.map(([label2], index) => ({ key: `f${index}`, label: label2 }));
+    surface.components.push({ id: id3, title: title2, kind: "detail-card", dataKey: id3, fields });
+    surface.data[id3] = Object.fromEntries(entries.map(([, value], index) => [`f${index}`, clip(value)]));
+  }
+  function table(id3, title2, labels, items, row, empty2) {
+    if (!items.length) return text2(id3, title2, empty2);
+    const columns = labels.map((label2, index) => ({ key: `c${index}`, label: label2 }));
+    const rows = [];
+    let bytes = 0;
+    for (const item of items) {
+      if (rows.length === limitRows) break;
+      const value = Object.fromEntries(row(item).map((cell, index) => [`c${index}`, clip(cell)]));
+      value.id = String(rows.length);
+      bytes += Buffer.byteLength(JSON.stringify(value)) + 1;
+      if (bytes > tableBudget) break;
+      rows.push(value);
+    }
+    if (!rows.length) return text2(id3, title2, hostDetails);
+    surface.components.push({
+      id: id3,
+      title: rows.length === items.length ? title2 : `${title2} (${rows.length}/${items.length} shown / \u5DF2\u663E\u793A)`,
+      kind: "table",
+      dataKey: id3,
+      rowKey: "id",
+      selection: "none",
+      columns
+    });
+    surface.data[id3] = rows;
+  }
+  function findings2(items, title2) {
+    table(
+      "findings",
+      title2,
+      ["Code / \u4EE3\u7801", "Severity / \u4E25\u91CD\u5EA6", "Finding / \u53D1\u73B0", "Source / \u6765\u6E90"],
+      items,
+      (finding) => [
+        finding.code,
+        finding.severity === "major" ? "major / \u4E3B\u8981" : finding.severity,
+        bilingual(finding.text),
+        finding.source
+      ],
+      "No findings recorded / \u65E0\u8BB0\u5F55\u7684\u53D1\u73B0"
+    );
+  }
+  function finish() {
+    text2("source", "Original evidence / \u539F\u59CB\u8BC1\u636E", hostDetails);
+    return surface;
+  }
+  return { text: text2, detail, table, findings: findings2, finish };
+}
+function inspectionCard(output, id2) {
+  const view = card(`gmp-inspect-${id2}`, `Batch inspection / \u6279\u6B21\u68C0\u67E5 \xB7 ${output.batch}`, `${output.batch} \xB7 ${revision(output.revision)}`);
+  view.detail("summary", "Inspection snapshot / \u68C0\u67E5\u5FEB\u7167", [
+    ["Batch / \u6279\u6B21", output.batch],
+    ["Inspected revision / \u68C0\u67E5\u7248\u672C", revision(output.revision)]
+  ]);
+  view.findings(output.findings, "Inspection findings / \u68C0\u67E5\u53D1\u73B0");
+  view.table("em", "Environmental monitoring excursions / \u73AF\u5883\u76D1\u6D4B\u8D85\u9650", [
+    "Sample, room and time / \u6837\u672C\u3001\u623F\u95F4\u4E0E\u65F6\u95F4",
+    "Viable count / \u6D3B\u83CC\u6570",
+    "Room alert limit / \u623F\u95F4\u8B66\u6212\u9650",
+    "Room action limit / \u623F\u95F4\u884C\u52A8\u9650",
+    "Disposition and evidence / \u5904\u7F6E\u4E0E\u8BC1\u636E"
+  ], output.em, (sample2) => {
+    const room2 = output.rooms.find(({ id: id3 }) => id3 === sample2.room);
+    const missingLimit = "Not in receipt / \u56DE\u6267\u672A\u8BB0\u5F55";
+    return [
+      `${sample2.id} \xB7 ${sample2.room} \xB7 ${sample2.at}`,
+      `${sample2.viable} CFU/m\xB3`,
+      room2 ? `${room2.viableAlert} CFU/m\xB3` : missingLimit,
+      room2 ? `${room2.viableAction} CFU/m\xB3` : missingLimit,
+      `${sample2.disposition === "assessed" ? "assessed / \u5DF2\u8BC4\u4F30" : "pending / \u5F85\u5904\u7F6E"} \xB7 ${sample2.evidence || noEvidence}`
+    ];
+  }, "No linked environmental excursions recorded / \u65E0\u5173\u8054\u73AF\u5883\u8D85\u9650\u8BB0\u5F55");
+  view.text("related-batches", "Related batches / \u5173\u8054\u6279\u6B21", output.relatedBatches.length ? clip(output.relatedBatches.join(" \xB7 ")) : "No related batches identified / \u672A\u8BC6\u522B\u51FA\u5173\u8054\u6279\u6B21");
+  view.text(
+    "hypothesis",
+    "B-2410-017 scenario hypothesis, not a verified root cause / B-2410-017 \u573A\u666F\u5047\u8BBE\uFF0C\u975E\u5DF2\u9A8C\u8BC1\u6839\u56E0",
+    bilingual(output.hypothesis)
+  );
+  view.table("equipment", "Equipment references / \u8BBE\u5907\u5F15\u7528", [
+    "Equipment / \u8BBE\u5907",
+    "Qualification / \u786E\u8BA4\u72B6\u6001",
+    "Last calibration / \u4E0A\u6B21\u6821\u51C6",
+    "Calibration due / \u6821\u51C6\u5230\u671F",
+    "Evidence references / \u8BC1\u636E\u5F15\u7528"
+  ], output.equipment, (item) => [
+    `${item.id} \xB7 ${bilingual(item.name)}`,
+    item.qualification === "qualified" ? "qualified / \u5DF2\u786E\u8BA4" : "suspended / \u5DF2\u6682\u505C",
+    item.calibrated,
+    item.due,
+    item.evidence.join(" \xB7 ") || noEvidence
+  ], "No linked equipment recorded / \u65E0\u5173\u8054\u8BBE\u5907\u8BB0\u5F55");
+  return view.finish();
+}
+function recordedConfirmation(mode, principal) {
+  return `${confirmationLabel(mode, principal, "en")} / ${confirmationLabel(mode, principal, "zh-CN")}`;
+}
+function dossierCard(output, id2) {
+  const current = revision(output.revision);
+  const ready = output.ready ? "Checks passed / \u68C0\u67E5\u5168\u90E8\u901A\u8FC7" : "Blocked / \u6709\u963B\u65AD\u9879";
+  const certificate2 = output.certificate;
+  const seeded = certificate2?.subjectRevision === "seed";
+  const view = card(`gmp-dossier-${id2}`, `Release dossier / \u653E\u884C\u6863\u6848 \xB7 ${output.batch}`, `${output.batch} \xB7 ${current} \xB7 ${ready}`);
+  view.detail("summary", "Current checklist and release evidence / \u5F53\u524D\u6E05\u5355\u4E0E\u653E\u884C\u8BC1\u636E", [
+    ["Batch / \u6279\u6B21", output.batch],
+    ["Current checked revision / \u5F53\u524D\u68C0\u67E5\u7248\u672C", current],
+    ["Scenario date / \u573A\u666F\u65E5\u671F", output.asOf],
+    ["Checklist readiness / \u6E05\u5355\u5C31\u7EEA\u72B6\u6001", ready],
+    ["Current blockers / \u5F53\u524D\u963B\u65AD\u9879", output.blockers.join(", ") || "None / \u65E0"],
+    ["Final QA release / QA \u6700\u7EC8\u653E\u884C", !certificate2 ? "No final QA release certificate on record / \u672A\u8BB0\u5F55 QA \u6700\u7EC8\u653E\u884C\u8BC1\u4E66" : seeded ? "Synthetic certificate on record / \u5DF2\u8BB0\u5F55\u5408\u6210\u6837\u4F8B\u8BC1\u4E66" : "Certificate on record / \u5DF2\u6709\u653E\u884C\u8BC1\u4E66"]
+  ]);
+  view.text(
+    "interpretation",
+    "How to read this dossier / \u5982\u4F55\u9605\u8BFB\u672C\u6863\u6848",
+    "Passing checks does not release a batch. Failed checklist rows are current blockers; historical findings are not necessarily current blockers. No approval or release is made by this check. \u6E05\u5355\u901A\u8FC7\u4E0D\u7B49\u4E8E\u653E\u884C\u3002\u672A\u901A\u8FC7\u7684\u68C0\u67E5\u9879\u624D\u662F\u5F53\u524D\u963B\u65AD\u9879\uFF0C\u5386\u53F2\u53D1\u73B0\u4E0D\u4E00\u5B9A\u4ECD\u6784\u6210\u963B\u65AD\u3002\u672C\u6B21\u68C0\u67E5\u4E0D\u4F5C\u6279\u51C6\u6216\u653E\u884C\u3002"
+  );
+  view.table(
+    "checks",
+    "Release checklist / \u653E\u884C\u6E05\u5355",
+    ["Key / \u952E", "Check / \u68C0\u67E5\u9879", "Result / \u7ED3\u679C"],
+    output.rows,
+    (row) => [row.key, bilingual(row.title), row.pass ? "Pass / \u901A\u8FC7" : "Block / \u963B\u65AD"],
+    "No checklist entries recorded / \u65E0\u68C0\u67E5\u9879\u8BB0\u5F55"
+  );
+  view.findings(output.findings, "Historical findings / \u5386\u53F2\u53D1\u73B0");
+  view.table("record-approvals", "Recorded quality approvals / \u5DF2\u8BB0\u5F55\u8D28\u91CF\u6279\u51C6", [
+    "Action / \u64CD\u4F5C",
+    "Approval reference / \u6279\u51C6\u5F15\u7528",
+    "Recorded by / \u8BB0\u5F55\u4EBA",
+    "Confirmation mode / \u786E\u8BA4\u65B9\u5F0F",
+    "Reviewed revision / \u5BA1\u9605\u7248\u672C",
+    "Recorded at / \u8BB0\u5F55\u65F6\u95F4"
+  ], output.evidence.recordApprovals, (entry) => [
+    entry.action,
+    entry.approvalId,
+    entry.recordedBy,
+    recordedConfirmation(entry.confirmationMode, entry.recordedBy),
+    revision(entry.reviewedRevision),
+    entry.recordedAt
+  ], "No quality approvals recorded in this dossier / \u672C\u6863\u6848\u672A\u8BB0\u5F55\u8D28\u91CF\u6279\u51C6");
+  const certificateTitle = "Recorded final QA release certificate / \u5DF2\u8BB0\u5F55\u7684 QA \u6700\u7EC8\u653E\u884C\u8BC1\u4E66";
+  if (certificate2) {
+    view.detail("certificate", certificateTitle, [
+      ["Certificate / \u8BC1\u4E66", certificate2.id],
+      ["Signer / \u7B7E\u7F72\u4EBA", certificate2.signer],
+      ["Confirmation mode / \u786E\u8BA4\u65B9\u5F0F", recordedConfirmation(certificate2.confirmationMode, certificate2.signer)],
+      ["Reviewed pre-signature revision / \u7B7E\u7F72\u524D\u5BA1\u9605\u7248\u672C", revision(certificate2.dossierRevision)],
+      ["Approval reference / \u6279\u51C6\u5F15\u7528", certificate2.approvalId],
+      ["Signed at / \u7B7E\u7F72\u65F6\u95F4", certificate2.at],
+      ["Signature meaning / \u7B7E\u540D\u542B\u4E49", certificate2.meaning],
+      [seeded ? "Synthetic placeholder, not a signature digest / \u5408\u6210\u5360\u4F4D\u503C\uFF0C\u975E\u7B7E\u540D\u6458\u8981" : "Signed subject digest / \u7B7E\u7F72\u7ED1\u5B9A\u6458\u8981", certificate2.subjectRevision]
+    ]);
+  } else {
+    view.text("certificate", certificateTitle, "No final QA release certificate recorded / \u65E0 QA \u6700\u7EC8\u653E\u884C\u8BC1\u4E66\u8BB0\u5F55");
+  }
+  return view.finish();
 }
 
 // src/policy.ts
@@ -543,11 +728,11 @@ function persist(store, p) {
       );
   }
 }
-function write(store, revision2, identity, action, record2, reason, mutate) {
+function write(store, revision3, identity, action, record2, reason, mutate) {
   if (!store) throw new Error("Owner store unavailable / \u4E1A\u52A1\u5B58\u50A8\u4E0D\u53EF\u7528");
   return store.transaction(() => {
     const p = read(store);
-    if (p.revision !== revision2) throw new Error("Stale dossier; refresh and review / \u6863\u6848\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u590D\u6838");
+    if (p.revision !== revision3) throw new Error("Stale dossier; refresh and review / \u6863\u6848\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u590D\u6838");
     if (p.audit.length >= 2e3) throw new Error("Demo audit capacity reached / \u6F14\u793A\u5BA1\u8BA1\u5BB9\u91CF\u5DF2\u6EE1");
     mutate(p);
     p.revision++;
@@ -557,7 +742,7 @@ function write(store, revision2, identity, action, record2, reason, mutate) {
       actor: identity.approval?.answeredBy.id ?? identity.actor,
       action,
       record: record2,
-      fromRevision: revision2,
+      fromRevision: revision3,
       toRevision: p.revision,
       reason,
       session: identity.session,
@@ -948,7 +1133,7 @@ function report(p, kind, batch2, locale) {
 import { Type } from "@sinclair/typebox";
 var text = Type.String({ maxLength: 12e3 });
 var id = Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9_.:-]+$" });
-var revision = Type.Integer({ minimum: 0 });
+var revision2 = Type.Integer({ minimum: 0 });
 var obj = (fields) => Type.Object(fields, { additionalProperties: false });
 var list = (schema) => Type.Array(schema, { maxItems: 2048 });
 var localized = obj({ en: text, "zh-CN": text });
@@ -972,7 +1157,7 @@ var certificate = obj({
   meaning: text,
   approvalId: text,
   subjectRevision: text,
-  dossierRevision: revision
+  dossierRevision: revision2
 });
 var step = obj({
   id,
@@ -988,7 +1173,7 @@ var batch = obj({
   id,
   product: localized,
   form: Type.Union([Type.Literal("tablet"), Type.Literal("capsule")]),
-  size: revision,
+  size: revision2,
   date: text,
   status: Type.Union(["production", "review", "released"].map((x) => Type.Literal(x))),
   review: Type.Union(["pending", "findings", "accepted"].map((x) => Type.Literal(x))),
@@ -1047,15 +1232,15 @@ var audit = obj({
   actor: text,
   action: text,
   record: text,
-  fromRevision: revision,
-  toRevision: revision,
+  fromRevision: revision2,
+  toRevision: revision2,
   reason: text,
   session: Type.Union([text, Type.Null()]),
   approval: Type.Union([text, Type.Null()])
 });
 var plantSchema = obj({
   version: Type.Literal(1),
-  revision,
+  revision: revision2,
   batches: list(batch),
   equipment: list(equipment),
   rooms: list(room),
@@ -1068,18 +1253,18 @@ var batchInput = obj({ batch: id });
 var changeInput = obj({
   action: Type.Union([Type.Literal("review"), Type.Literal("investigate"), Type.Literal("advance")]),
   batch: id,
-  expectedRevision: revision,
+  expectedRevision: revision2,
   evidence: Type.Optional(Type.String({ minLength: 12, maxLength: 2e3 }))
 });
 var releaseInput = obj({
   batch: id,
-  expectedRevision: revision,
+  expectedRevision: revision2,
   meaning: Type.String({ minLength: 1, maxLength: 500 })
 });
 var findingSchema = obj({ severity: text, code: text, text: localized, source: text });
 var dossierSchema = obj({
   batch: id,
-  revision,
+  revision: revision2,
   asOf: text,
   signatureMeaning: text,
   ready: Type.Boolean(),
@@ -1093,7 +1278,7 @@ var dossierSchema = obj({
         approvalId: text,
         recordedBy: text,
         recordedAt: text,
-        reviewedRevision: revision,
+        reviewedRevision: revision2,
         confirmationMode: Type.Optional(text)
       })
     ),
@@ -1107,7 +1292,7 @@ var dossierSchema = obj({
 });
 var investigationSchema = obj({
   batch: id,
-  revision,
+  revision: revision2,
   rooms: list(room),
   findings: list(findingSchema),
   em: list(sample),
@@ -1119,18 +1304,18 @@ var snapshotSchema = obj({
   plant: plantSchema,
   dossiers: list(dossierSchema),
   kpi: obj({
-    batches: revision,
-    production: revision,
-    awaiting: revision,
-    released: revision,
-    rft: revision,
-    deviations: Type.Record(Type.String(), revision),
-    overdue: revision,
-    excursions: revision
+    batches: revision2,
+    production: revision2,
+    awaiting: revision2,
+    released: revision2,
+    rft: revision2,
+    deviations: Type.Record(Type.String(), revision2),
+    overdue: revision2,
+    excursions: revision2
   })
 });
 var receiptSchema = obj({
-  revision,
+  revision: revision2,
   batch: id,
   dossier: dossierSchema,
   signature: Type.Optional(
@@ -1139,7 +1324,7 @@ var receiptSchema = obj({
       signer: text,
       confirmationMode: Type.Optional(text),
       signedAt: text,
-      reviewedRevision: revision,
+      reviewedRevision: revision2,
       purpose: Type.Literal("business.confirm"),
       meaning: text
     })
@@ -1243,6 +1428,35 @@ var failure = (error, ctx) => {
   ctx.signal.throwIfAborted();
   return toolError(error instanceof Error ? error.message : String(error));
 };
+function renderCode(value) {
+  return value && typeof value === "object" && "code" in value && typeof value.code === "string" ? value.code : void 0;
+}
+async function evidenceResult(output, ctx, buildCard) {
+  const response = result(output);
+  let code;
+  try {
+    if (ctx.tools.list().some((tool) => tool.name === "ui_render")) {
+      const id2 = createHash2("sha256").update(ctx.session.toolUseId).digest("hex").slice(0, 48);
+      const rendered = await ctx.tools.invoke("ui_render", { surface: buildCard(output, id2) }, { signal: ctx.signal });
+      ctx.signal.throwIfAborted();
+      if (!rendered.isError) return response;
+      code = renderCode(rendered.structured) ?? renderCode(rendered.details);
+    }
+  } catch (error) {
+    ctx.signal.throwIfAborted();
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    const data = error && typeof error === "object" && "data" in error ? error.data : void 0;
+    code = renderCode(data) ?? renderCode(error);
+  }
+  if (code === "CANCELLED" || code === "ABORTED")
+    throw new DOMException("Evidence display cancelled", "AbortError");
+  const capacity = code === "UI_LIMIT";
+  response.content.unshift({
+    type: "text",
+    text: (capacity ? "Evidence card unavailable: the session has reached the open-card limit (UI_LIMIT). " : "Evidence card unavailable. ") + "Open the Host tool details for the original evidence record.\n" + (capacity ? "\u8BC1\u636E\u5361\u65E0\u6CD5\u663E\u793A\uFF1A\u672C\u4F1A\u8BDD\u5DF2\u8FBE\u6253\u5F00\u7684\u5361\u7247\u4E0A\u9650\uFF08UI_LIMIT\uFF09\u3002" : "\u8BC1\u636E\u5361\u65E0\u6CD5\u663E\u793A\u3002") + "\u8BF7\u6253\u5F00\u5BBF\u4E3B\u5DE5\u5177\u8BE6\u60C5\u67E5\u770B\u539F\u59CB\u8BC1\u636E\u8BB0\u5F55\u3002\n"
+  });
+  return response;
+}
 var inspect = defineTool({
   name: "pharma_inspect",
   description: "Inspect a batch, CPP/ALCOA+ findings, linked EM/equipment and affected batches. Read-only. / \u8BFB\u53D6\u6279\u6B21\u3001\u9650\u5EA6\u3001\u7B7E\u540D\u3001EM\u3001\u8BBE\u5907\u53CA\u5F71\u54CD\u8303\u56F4\u3002",
@@ -1252,7 +1466,7 @@ var inspect = defineTool({
   async execute(input, ctx) {
     ctx.signal.throwIfAborted();
     try {
-      return result(investigation(read(ctx.store), input.batch));
+      return evidenceResult(investigation(read(ctx.store), input.batch), ctx, inspectionCard);
     } catch (e) {
       return failure(e, ctx);
     }
@@ -1267,7 +1481,7 @@ var checklist = defineTool({
   async execute(input, ctx) {
     ctx.signal.throwIfAborted();
     try {
-      return result(dossier(read(ctx.store), input.batch));
+      return evidenceResult(dossier(read(ctx.store), input.batch), ctx, dossierCard);
     } catch (e) {
       return failure(e, ctx);
     }
