@@ -1,6 +1,7 @@
 import { PageHeader } from '@agnes/web-ui'
 import React from 'react'
 import { BatchDrawer, button, h } from './components.js'
+import { applySignedReceipts } from './evidence/signed-receipts.js'
 import { words } from './locale.js'
 import { Audit, Batches, Deviations, EM, Home, Release } from './pages.js'
 import { ModuleLinks, ObjectDossier, Tasks, WorkButton, WorkOwner } from './workbench.js'
@@ -16,6 +17,7 @@ const pages = {
   object: ObjectDossier,
 }
 export function apply(ctx, config) {
+  applySignedReceipts(ctx)
   const offLocale = ctx.locale.register(
     'pharma-quality',
     Object.fromEntries(

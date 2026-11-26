@@ -62,11 +62,17 @@ Quality records and batch release are business acts. Tools request `business.con
 
 The signature card shows the object, reviewed revision, exact meaning and evidence in the current UI language. The human answer must return that view’s bound meaning unchanged; receipts and audit records preserve it. A legacy null answer cannot complete these new signatures.
 
+After explicit Sableleaf adoption, the conversation can show a read-only `pharma_record` or `pharma_release` receipt beside the Host tool result. The card requires the finalized successful result, the signed receipt format, and an exact match between the session's GMP package pin and the adopted package. It shows the recorded signer, confirmation mode, and the reviewed revision separately from the revision produced by the write. It never signs, replays, or changes a record.
+
+Unadopted, older, cancelled, refused, or unverifiable results do not get a signed receipt card. The Host tool record remains available under the user's existing access. The structured response adds `receiptFormat`; the original tool text, business fields and services stay unchanged.
+
 Version 1.2.2 declares report generation as history evidence: Core waits for full session-history verification before dispatch.
 
 Version 1.2.1 adds role subagents and the single Quality Assistant entry; existing installations can review the bundled update on the Plugins page. Installation and application adoption remain separate.
 
-The workbench offers Current object, Pending signatures and Evidence & reports. Start deviation, CAPA, EM, batch review or QA release work from object buttons or composer actions; the hub delegates to four specialist roles and records their attribution. Overview and Tasks & signatures form the primary navigation; all other modules remain under More and overview links.
+The workbench offers Current object, Pending signatures and Evidence & reports. Start deviation, CAPA, EM, batch review or QA release work from object buttons or composer actions; the hub delegates to four specialist roles and records their attribution. Overview and Tasks & signatures remain the primary navigation.
+
+The existing secondary pages appear under **More**: Batches & records, Deviations & CAPA, Environmental monitoring, QA release, and Audit trail. After updating the plugin, review and adopt the exact updated Sableleaf application in **Settings → Application**. Updating the plugin alone does not adopt the application.
 
 Role children capture a spawn-time intersection of role and parent tools, file/network scope, sandbox and read-only limits. Tool calls needing approval wait on the parent human card and Web Approvals tab; only an authenticated human can allow once or reject, and no human surface means refusal. Parent/ancestor stop or close withdraws pending requests. Role children cannot obtain business signatures, even from a Full access parent; signed actions return to the main Quality Assistant. Their persistent persona comes from the role recipe, independently of the editable launch draft.
 

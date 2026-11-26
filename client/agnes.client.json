@@ -3,8 +3,9 @@
     "id": "pharma-quality",
     "entry": "./index.js",
     "lifetime": "profile",
-    "styles": ["./style.css"],
-    "slots": [],
+    "styles": ["./style.css", "./evidence/style.css"],
+    "slots": ["tool.view.cordis"],
+    "slotCatalogVersion": "dsh-client-slots/v1",
     "services": ["pharma.snapshot", "pharma.change", "pharma.release"],
     "projections": [],
     "homeEntries": [

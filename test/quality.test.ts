@@ -19,6 +19,15 @@ import { sign } from '../src/signature.js'
 
 const packageDir = fileURLToPath(new URL('../', import.meta.url)),
   batch = 'B-2410-017'
+const signedReceiptFormat = '@agnes-showcase/pharma-gmp/signed-receipt@1'
+function expectSignedReceipt(result: { structured?: unknown; content: readonly { type: string; text?: string }[] }) {
+  expect(result.structured).toMatchObject({ receiptFormat: signedReceiptFormat })
+  const original = result.content[0]
+  if (original?.type !== 'text' || !original.text) throw new Error('Missing original receipt text')
+  const parsed = JSON.parse(original.text)
+  expect(parsed).not.toHaveProperty('receiptFormat')
+  expect({ ...parsed, receiptFormat: signedReceiptFormat }).toEqual(result.structured)
+}
 it('review-role: the real pharma record and profile service cannot write using a role child decision port', async () => {
   const home = await mkdtemp(join(tmpdir(), 'agh-role-pharma-'))
   const { host } = await createTestHost({ dataDir: home, disableSessionTitle: true })
@@ -234,8 +243,9 @@ it('shares service/tool state, persists across Host restart, and refuses missing
     const initial = (await host.invokeProfileService('pharma.snapshot', {})) as { plant: Plant }
     expect(initial.plant.revision).toBe(0)
     const args = { action: 'investigate', batch, expectedRevision: 0 }
-    const changed = (await host.invoke('pharma_record', args)).structured as { revision: number }
-    expect(changed.revision).toBe(1)
+    const changed = await host.invoke('pharma_record', args)
+    expectSignedReceipt(changed)
+    expect(changed.structured).toMatchObject({ revision: 1 })
     const inspected = await host.invoke('pharma_inspect', { batch })
     expect(inspected.isError).not.toBe(true)
     const state = (await host.invokeProfileService('pharma.snapshot', {})) as { plant: Plant }
@@ -243,11 +253,12 @@ it('shares service/tool state, persists across Host restart, and refuses missing
     expect(state.plant.audit.at(-1)!.approval).toBe('fixture-human-approval')
     expect(state.plant.audit.at(-1)?.signatureMeaning).toBe('我确认本合成质量记录。')
     await expect(host.invokeProfileService('pharma.change', args)).rejects.toThrow('approval proof')
-    expect((await host.invoke('pharma_record', args)).isError).toBe(true)
-    expect(
-      (await host.invoke('pharma_release', { batch, expectedRevision: 1, meaning: SIGNATURE_MEANING }))
-        .isError,
-    ).toBe(true)
+    const stale = await host.invoke('pharma_record', args)
+    expect(stale.isError).toBe(true)
+    expect(stale.structured).toBeUndefined()
+    const blocked = await host.invoke('pharma_release', { batch, expectedRevision: 1, meaning: SIGNATURE_MEANING })
+    expect(blocked.isError).toBe(true)
+    expect(blocked.structured).toBeUndefined()
     await expect(
       host.invokeProfileService('pharma.release', { batch, expectedRevision: 1, meaning: SIGNATURE_MEANING }),
     ).rejects.toThrow('approval proof')
@@ -257,6 +268,7 @@ it('shares service/tool state, persists across Host restart, and refuses missing
     const cancelled = new AbortController()
     cancelled.abort(new Error('Stop review'))
     await expect(host.invoke('pharma_inspect', { batch }, cancelled.signal)).rejects.toThrow('Stop review')
+    await expect(host.invoke('pharma_record', args, cancelled.signal)).rejects.toThrow('Stop review')
     await host.dispose()
     host = await createPluginTestHost(main, fixtureOptions)
     expect(await host.invokeProfileService('pharma.snapshot', {})).toEqual(state)
@@ -361,6 +373,7 @@ it('requires real Core human approval; preserves original OOS through CAPA/retes
         if (verdict === 'rejected') {
           const refused = await invoke('pharma_record', { action: 'investigate', batch, expectedRevision: 0 })
           expect(refused.isError).toBe(true)
+          expect(refused.structured).toBeUndefined()
           expect((await invoke('pharma_dossier', { batch })).structured).toMatchObject({
             revision: 0,
             ready: false,
@@ -385,6 +398,7 @@ it('requires real Core human approval; preserves original OOS through CAPA/retes
           })
           expect(changed.isError, JSON.stringify(changed)).not.toBe(true)
           expect(changed.structured).toMatchObject({
+            receiptFormat: signedReceiptFormat,
             signature: {
               signer: base === 'full-access' ? 'u' : 'human.qa',
               purpose: 'business.confirm',
@@ -453,6 +467,7 @@ it('requires real Core human approval; preserves original OOS through CAPA/retes
           meaning: SIGNATURE_MEANING,
         })
         expect(stale.isError).toBe(true)
+        expect(stale.structured).toBeUndefined()
         const wrong = await invoke('pharma_release', { batch, expectedRevision: 5, meaning: 'approve' })
         expect(wrong.isError).toBe(true)
         const released = await invoke('pharma_release', {
@@ -461,6 +476,7 @@ it('requires real Core human approval; preserves original OOS through CAPA/retes
           meaning: SIGNATURE_MEANING,
         })
         expect(released.isError, JSON.stringify(released)).not.toBe(true)
+        expectSignedReceipt(released)
         expect(released.structured).toMatchObject({
           revision: 6,
           dossier: {

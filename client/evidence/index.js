@@ -52,7 +52,7 @@ function useOutput(ctx, block) {
   }
 }
 export function apply(ctx) {
-  for (const name of ['pharma_inspect', 'pharma_dossier', 'pharma_record', 'pharma_release']) {
+  for (const name of ['pharma_inspect', 'pharma_dossier']) {
     const remove = ctx.slots.inject('tool.call.toolview', () =>
       ctx.slots.register(
         { name: 'tool.call.toolview', key: name, id: `${name}-evidence` },
@@ -61,16 +61,11 @@ export function apply(ctx) {
           const zh = locale === 'zh-CN',
             block = owner?.block
           const output = useOutput(ctx, block)
-          const check = output?.dossier ?? output
-          const proofs = output?.signature
-            ? [output.signature]
-            : [
-                ...(check?.evidence?.recordApprovals ?? []).map((entry) => ({
-                  ...entry,
-                  signer: entry.recordedBy,
-                })),
-                ...(check?.certificate ? [check.certificate] : []),
-              ]
+          const check = output
+          const proofs = [
+            ...(check?.evidence?.recordApprovals ?? []).map((entry) => ({ ...entry, signer: entry.recordedBy })),
+            ...(check?.certificate ? [check.certificate] : []),
+          ]
           return h(
             'section',
             { className: 'ph-evidence-card', 'aria-label': zh ? '质量证据' : 'Quality evidence' },
