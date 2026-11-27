@@ -51,6 +51,11 @@ Only the exact nightly EM export (`kind=em` plus a supported locale) may run una
 
 Release dossier tools return the original findings together with current blockers and the deviation, retest, EM and equipment evidence. A certificate binds the reviewed pre-signature dossier revision; signing advances the state revision by one.
 
+`pharma_inspect` and `pharma_dossier` use AGH's `ui_render` to show bilingual, read-only evidence cards. The inspection card shows findings, environmental measurements and room limits, and related batches. The dossier card separates the checklist verdict at the checked revision from historical findings and any release certificate already on record. A passing checklist does not release a batch.
+
+The cards summarize the evidence. The original JSON and structured result stay in the Host tool record. If `ui_render` is unavailable or the session reaches the open-card limit, the result includes a bilingual notice pointing to the original record. GMP does not close or replace other cards.
+On AGH builds that return a structured `UI_LIMIT` refusal, a full session does not pause the conversation. Older builds can still ask whether the card opened.
+
 ## Business signatures
 
 Quality records and batch release are business acts. Tools request `business.confirm`, binding exact arguments, business object, revision, evidence and signature meaning. Under full access, Host automatically submits the declared approving response for the session's human principal, without a pending card. Receipts, audit records and release/closure records say **auto-confirmed under full access**; this is never a manual click or a model signature. Other permission levels retain manual sign/reject/cancel/expiry behavior. Host consumes each decision once; the private admission checks the same live epoch, cancellation and deadline inside the store transaction, so narrowing away from full access before commit blocks the write. Ambiguous or incomplete approving contracts still ask a person. Page effects retain Host human confirmation and revision checks.

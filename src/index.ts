@@ -1,9 +1,11 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { type ServiceContext, type ToolContext, toolPolicyKind } from '@agnes/extension-api'
+import type { UiSurface } from '@agnes/protocol'
 import { type Context, defineAgnesPlugin, defineTool, toolError } from '@agnes/plugin-runtime'
 import type {} from '@agnes/resource-control-runtime'
 import { Type } from '@sinclair/typebox'
+import { dossierCard, inspectionCard } from './evidence-cards.js'
 import { SIGNATURE_MEANING, SIGNATURE_MEANINGS } from './model.js'
 import { qualityPolicy } from './policy.js'
 import { dashboard, dossier, investigation } from './quality.js'
@@ -58,6 +60,49 @@ const failure = (error: unknown, ctx: ToolContext) => {
   ctx.signal.throwIfAborted()
   return toolError(error instanceof Error ? error.message : String(error))
 }
+function renderCode(value: unknown) {
+  return value && typeof value === 'object' && 'code' in value && typeof value.code === 'string'
+    ? value.code
+    : undefined
+}
+
+async function evidenceResult<T>(
+  output: T,
+  ctx: ToolContext,
+  buildCard: (output: T, id: string) => UiSurface,
+) {
+  const response = result(output)
+  let code: string | undefined
+  try {
+    if (ctx.tools.list().some((tool) => tool.name === 'ui_render')) {
+      const id = createHash('sha256').update(ctx.session.toolUseId).digest('hex').slice(0, 48)
+      const rendered = await ctx.tools.invoke('ui_render', { surface: buildCard(output, id) }, { signal: ctx.signal })
+      ctx.signal.throwIfAborted()
+      if (!rendered.isError) return response
+      code = renderCode(rendered.structured) ?? renderCode(rendered.details)
+    }
+  } catch (error) {
+    ctx.signal.throwIfAborted()
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    const data = error && typeof error === 'object' && 'data' in error ? error.data : undefined
+    code = renderCode(data) ?? renderCode(error)
+  }
+  if (code === 'CANCELLED' || code === 'ABORTED')
+    throw new DOMException('Evidence display cancelled', 'AbortError')
+  const capacity = code === 'UI_LIMIT'
+  response.content.unshift({
+    type: 'text',
+    text:
+      (capacity
+        ? 'Evidence card unavailable: the session has reached the open-card limit (UI_LIMIT). '
+        : 'Evidence card unavailable. ') +
+      'Open the Host tool details for the original evidence record.\n' +
+      (capacity ? '证据卡无法显示：本会话已达打开的卡片上限（UI_LIMIT）。' : '证据卡无法显示。') +
+      '请打开宿主工具详情查看原始证据记录。\n',
+  })
+  return response
+}
+
 export const inspect = defineTool({
   name: 'pharma_inspect',
   description:
@@ -68,7 +113,7 @@ export const inspect = defineTool({
   async execute(input, ctx) {
     ctx.signal.throwIfAborted()
     try {
-      return result(investigation(read(ctx.store), input.batch))
+      return evidenceResult(investigation(read(ctx.store), input.batch), ctx, inspectionCard)
     } catch (e) {
       return failure(e, ctx)
     }
@@ -84,7 +129,7 @@ export const checklist = defineTool({
   async execute(input, ctx) {
     ctx.signal.throwIfAborted()
     try {
-      return result(dossier(read(ctx.store), input.batch))
+      return evidenceResult(dossier(read(ctx.store), input.batch), ctx, dossierCard)
     } catch (e) {
       return failure(e, ctx)
     }
