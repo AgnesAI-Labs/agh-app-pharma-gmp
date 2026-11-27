@@ -63,7 +63,15 @@ it('inspects and installs the third-party application with valid raster assets a
     expect(preview.application?.workbench?.tabs).toHaveLength(3)
     expect(preview.application?.workbench?.actions).toHaveLength(5)
     expect(preview.application?.workbench?.scenarios).toHaveLength(3)
-    expect(preview.application?.presentation?.navigation?.entries).toHaveLength(2)
+    expect(preview.application?.presentation?.navigation?.entries).toEqual([
+      '@agnes-showcase/pharma-gmp#pharma-home',
+      '@agnes-showcase/pharma-gmp#pharma-tasks',
+      '@agnes-showcase/pharma-gmp#pharma-batches',
+      '@agnes-showcase/pharma-gmp#pharma-deviations',
+      '@agnes-showcase/pharma-gmp#pharma-em',
+      '@agnes-showcase/pharma-gmp#pharma-release',
+      '@agnes-showcase/pharma-gmp#pharma-audit',
+    ])
     const installed = await manager.install(profile, source, { expectedIntegrity: preview.integrity })
     expect(installed).toBeDefined()
   } finally {

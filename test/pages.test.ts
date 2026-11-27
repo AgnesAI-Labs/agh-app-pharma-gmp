@@ -17,6 +17,8 @@ const identity: ModuleIdentity = {
   packageId: '@agnes-showcase/pharma-gmp',
   rowId: 'ext:@agnes-showcase/pharma-gmp/main',
   revision: 'one',
+  allowedSlots: declaration.slots,
+  slotCatalogVersion: declaration.slotCatalogVersion,
   services: declaration.services,
   homeEntries: declaration.homeEntries,
   publicConfig: {},

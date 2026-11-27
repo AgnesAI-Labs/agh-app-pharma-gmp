@@ -1424,6 +1424,18 @@ var result = (output) => ({
   content: [{ type: "text", text: JSON.stringify(output) }],
   structured: output
 });
+var signedReceiptSchema = Type2.Object(
+  {
+    ...receiptSchema.properties,
+    receiptFormat: Type2.Optional(Type2.Literal("@agnes-showcase/pharma-gmp/signed-receipt@1"))
+  },
+  { additionalProperties: false }
+);
+function signedResult(output) {
+  const response = result(output);
+  response.structured.receiptFormat = signedReceiptSchema.properties.receiptFormat.const;
+  return response;
+}
 var failure = (error, ctx) => {
   ctx.signal.throwIfAborted();
   return toolError(error instanceof Error ? error.message : String(error));
@@ -1491,7 +1503,7 @@ var record = defineTool({
   name: "pharma_record",
   description: "On an explicit user request, invoke this tool directly: it requests Host business consent before writing (manual, or explicitly recorded automatic confirmation for the human under full access); do not substitute ask_user_question or ui_render. action=review records the independent BPR review (resolving the bpr checklist item); it is not final release and does not require bpr to pass beforehand. Investigate deviation, or advance the explicitly synthetic evidence scenario (investigation \u2192 CAPA \u2192 effectiveness \u2192 closed). Read latest revision first. Never invent real evidence. / \u4EBA\u5DE5\u5BA1\u6838\u540E\u590D\u6838\u6279\u8BB0\u5F55\u3001\u8C03\u67E5\u504F\u5DEE\u6216\u5F55\u5165\u660E\u786E\u7684\u5408\u6210\u573A\u666F\u8BC1\u636E\u3002",
   parameters: changeInput,
-  result: receiptSchema,
+  result: signedReceiptSchema,
   meta: { ...meta(true, true), isDestructive: false },
   async execute(input, ctx) {
     ctx.signal.throwIfAborted();
@@ -1503,7 +1515,7 @@ var record = defineTool({
         input.batch
       );
       const p = change(ctx.store, input, { ...who(ctx), approval });
-      return result({
+      return signedResult({
         revision: p.revision,
         batch: input.batch,
         dossier: dossier(p, input.batch),
@@ -1518,7 +1530,7 @@ var releaseTool = defineTool({
   name: "pharma_release",
   description: "Consequential QA batch release. Use dossier.signatureMeaning exactly. Requires exact dossier revision, signature meaning and Host business consent (manual, or recorded for the human under full access) requested inside this tool; invoke directly on an explicit release request, never substitute a question or self-authorize. / QA \u6279\u6B21\u653E\u884C\uFF1A\u987B\u7CBE\u786E\u7248\u672C\u3001\u7B7E\u540D\u542B\u4E49\u548C\u72EC\u7ACB\u7684\u4EBA\u5DE5\u4E1A\u52A1\u7B7E\u540D\u3002",
   parameters: releaseInput,
-  result: receiptSchema,
+  result: signedReceiptSchema,
   meta: meta(true, true),
   async execute(input, ctx) {
     ctx.signal.throwIfAborted();
@@ -1528,7 +1540,7 @@ var releaseTool = defineTool({
         throw new Error("Release prerequisites or signature meaning not satisfied / \u653E\u884C\u6761\u4EF6\u6216\u7B7E\u540D\u542B\u4E49\u4E0D\u6EE1\u8DB3");
       const approval = await sign(ctx, { ...input, dossier: check }, SIGNATURE_MEANINGS, input.batch);
       const p = release(ctx.store, input, { ...who(ctx), approval });
-      return result({
+      return signedResult({
         revision: p.revision,
         batch: input.batch,
         dossier: dossier(p, input.batch),

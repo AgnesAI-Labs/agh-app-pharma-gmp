@@ -522,7 +522,12 @@
         "navigation": {
           "entries": [
             "@agnes-showcase/pharma-gmp#pharma-home",
-            "@agnes-showcase/pharma-gmp#pharma-tasks"
+            "@agnes-showcase/pharma-gmp#pharma-tasks",
+            "@agnes-showcase/pharma-gmp#pharma-batches",
+            "@agnes-showcase/pharma-gmp#pharma-deviations",
+            "@agnes-showcase/pharma-gmp#pharma-em",
+            "@agnes-showcase/pharma-gmp#pharma-release",
+            "@agnes-showcase/pharma-gmp#pharma-audit"
           ],
           "hideBuiltin": [
             "agents",

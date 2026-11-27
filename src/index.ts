@@ -4,7 +4,7 @@ import { type ServiceContext, type ToolContext, toolPolicyKind } from '@agnes/ex
 import type { UiSurface } from '@agnes/protocol'
 import { type Context, defineAgnesPlugin, defineTool, toolError } from '@agnes/plugin-runtime'
 import type {} from '@agnes/resource-control-runtime'
-import { Type } from '@sinclair/typebox'
+import { type Static, Type } from '@sinclair/typebox'
 import { dossierCard, inspectionCard } from './evidence-cards.js'
 import { SIGNATURE_MEANING, SIGNATURE_MEANINGS } from './model.js'
 import { qualityPolicy } from './policy.js'
@@ -56,6 +56,19 @@ const result = <T>(output: T) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(output) }],
   structured: output,
 })
+const signedReceiptSchema = Type.Object(
+  {
+    ...receiptSchema.properties,
+    receiptFormat: Type.Optional(Type.Literal('@agnes-showcase/pharma-gmp/signed-receipt@1')),
+  },
+  { additionalProperties: false },
+)
+function signedResult(output: Static<typeof signedReceiptSchema>) {
+  const response = result(output)
+  // Tool details persist structured output. Keep the existing model-facing text unchanged.
+  response.structured.receiptFormat = signedReceiptSchema.properties.receiptFormat.const
+  return response
+}
 const failure = (error: unknown, ctx: ToolContext) => {
   ctx.signal.throwIfAborted()
   return toolError(error instanceof Error ? error.message : String(error))
@@ -140,7 +153,7 @@ export const record = defineTool({
   description:
     'On an explicit user request, invoke this tool directly: it requests Host business consent before writing (manual, or explicitly recorded automatic confirmation for the human under full access); do not substitute ask_user_question or ui_render. action=review records the independent BPR review (resolving the bpr checklist item); it is not final release and does not require bpr to pass beforehand. Investigate deviation, or advance the explicitly synthetic evidence scenario (investigation → CAPA → effectiveness → closed). Read latest revision first. Never invent real evidence. / 人工审核后复核批记录、调查偏差或录入明确的合成场景证据。',
   parameters: changeInput,
-  result: receiptSchema,
+  result: signedReceiptSchema,
   meta: { ...meta(true, true), isDestructive: false },
   async execute(input, ctx) {
     ctx.signal.throwIfAborted()
@@ -152,7 +165,7 @@ export const record = defineTool({
         input.batch,
       )
       const p = change(ctx.store, input, { ...who(ctx), approval })
-      return result({
+      return signedResult({
         revision: p.revision,
         batch: input.batch,
         dossier: dossier(p, input.batch),
@@ -168,7 +181,7 @@ export const releaseTool = defineTool({
   description:
     'Consequential QA batch release. Use dossier.signatureMeaning exactly. Requires exact dossier revision, signature meaning and Host business consent (manual, or recorded for the human under full access) requested inside this tool; invoke directly on an explicit release request, never substitute a question or self-authorize. / QA 批次放行：须精确版本、签名含义和独立的人工业务签名。',
   parameters: releaseInput,
-  result: receiptSchema,
+  result: signedReceiptSchema,
   meta: meta(true, true),
   async execute(input, ctx) {
     ctx.signal.throwIfAborted()
@@ -183,7 +196,7 @@ export const releaseTool = defineTool({
         throw new Error('Release prerequisites or signature meaning not satisfied / 放行条件或签名含义不满足')
       const approval = await sign(ctx, { ...input, dossier: check }, SIGNATURE_MEANINGS, input.batch)
       const p = release(ctx.store, input, { ...who(ctx), approval })
-      return result({
+      return signedResult({
         revision: p.revision,
         batch: input.batch,
         dossier: dossier(p, input.batch),
